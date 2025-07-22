@@ -6,7 +6,12 @@ namespace HotUpdate
     {
         public static void Run()
         {
-            Debug.Log("Hello, HybridCLR");
+            // Debug.Log("Hello, HybridCLR");
+
+            Debug.Log("Hello, World");
+
+            var go = new GameObject("Test1");
+            go.AddComponent<Print>();
         }
     }
 }
