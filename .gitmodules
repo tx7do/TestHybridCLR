@@ -1,7 +1,6 @@
-[submodule "hybridclr"]
-    path = HybridCLRData/hybridclr_repo
-    url = https://github.com/focus-creative-games/hybridclr.git
-    
-[submodule "il2cpp_plus"]
-    path = HybridCLRData/il2cpp_plus_repo
-    url = https://gitee.com/focus-creative-games/il2cpp_plus.git
+[submodule "HybridCLRData/hybridclr_repo"]
+	path = HybridCLRData/hybridclr_repo
+	url = https://github.com/focus-creative-games/hybridclr.git
+[submodule "HybridCLRData/il2cpp_plus_repo"]
+	path = HybridCLRData/il2cpp_plus_repo
+	url = https://github.com/focus-creative-games/il2cpp_plus.git
