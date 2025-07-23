@@ -46,6 +46,7 @@
 /hybridclr_assets/
 /hybridclr_il2cpp_output/
 /hybridclr_il2cpp_output_*
+/HybridCLRData/HotUpdateDlls
 
 # 预编译的 dll
 /Assets/Plugins/HybridCLR/AOT/
