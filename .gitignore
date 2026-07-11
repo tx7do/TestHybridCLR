@@ -63,11 +63,12 @@
 # =====================================
 # 常见第三方插件忽略规则
 # =====================================
-# Addressables
-/Assets/AddressableAssetsData/AssetGroups/
+# Addressables 构建产物（配置文件 AssetGroups/*.asset 入版本库，构建产物不入库）
 /Assets/AddressableAssetsData/ContentState/
 /Assets/AddressableAssetsData/builds/
 /Assets/AddressableAssetsData/AssetBundleManifest.asset
+# 远程构建输出目录（ServerData，由打包脚本生成）
+/ServerData/
 
 # TextMeshPro
 /TMP/Fonts/*

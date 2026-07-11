@@ -2,8 +2,16 @@
 """
 热更新本地测试服务器。
 
-serve HybridCLRData/ServerOutput/ 目录，
-提供 manifest.json 和 HotUpdate.dll 的 HTTP 下载。
+同时 serve 代码热更新和资源热更新(Addressables)的内容：
+
+  http://localhost:8080/
+    ├── manifest.json          ← 代码热更版本清单
+    ├── HotUpdate.dll          ← 代码热更 DLL
+    └── Addressables/
+        └── [BuildTarget]/     ← Addressables 远程构建产物
+            ├── catalog_*.json
+            ├── catalog_*.hash
+            └── *.bundle
 
 用法:
     cd <项目根目录>
@@ -11,6 +19,8 @@ serve HybridCLRData/ServerOutput/ 目录，
     python3 tools/serve_hotupdate.py 9000       # 指定端口
 
 运行时客户端默认连接 http://localhost:8080。
+Addressables Profile 的 Remote.LoadPath 应配置为:
+    http://localhost:8080/Addressables/[BuildTarget]
 """
 
 import sys
@@ -30,12 +40,14 @@ def main():
 
     if not os.path.isdir(serve_dir):
         print(f"[ERROR] 服务器输出目录不存在: {serve_dir}")
-        print("请先在 Unity 中执行菜单 HotUpdate/1. Build HotUpdate Package (一键打包)")
+        print("请先在 Unity 中执行:")
+        print("  1. HotUpdate/1. Build HotUpdate Package (代码打包)")
+        print("  2. HotUpdate/Addressables/2. Build Addressables (资源打包)")
         sys.exit(1)
 
     os.chdir(serve_dir)
 
-    # 添加 CORS 头，方便 UnityWebRequest 跨域（本地无害）
+    # 添加 CORS 头，方便 UnityWebRequest / WebGL 跨域访问
     class CORSHandler(SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -44,31 +56,45 @@ def main():
             super().end_headers()
 
         def log_message(self, format, *args):
-            # 带颜色的时间戳前缀
             msg = format % args
             print(f"  \033[90m[{self.log_date_time_string()}]\033[0m {msg}")
 
     handler = functools.partial(CORSHandler, directory=serve_dir)
 
     with socketserver.TCPServer(("0.0.0.0", port), handler) as httpd:
-        # 获取本机所有 IP 地址，方便真机连接
-        print("=" * 60)
+        local_ip = get_local_ip()
+        print("=" * 65)
         print("  HybridCLR 热更新本地服务器")
-        print("=" * 60)
+        print("=" * 65)
         print(f"  服务目录: {serve_dir}")
         print(f"  访问地址:")
         print(f"    本机:   http://localhost:{port}")
-        print(f"    本机IP: http://{get_local_ip()}:{port}  (真机测试用)")
+        print(f"    本机IP: http://{local_ip}:{port}  (真机测试用)")
         print()
-        print("  可用文件:")
-        for name in sorted(os.listdir(serve_dir)):
-            filepath = os.path.join(serve_dir, name)
-            if os.path.isfile(filepath):
-                size_kb = os.path.getsize(filepath) / 1024
-                print(f"    /{name}  ({size_kb:.1f} KB)")
+
+        # 列出代码热更文件
+        print("  ── 代码热更新 ──")
+        list_files(serve_dir, prefix="    ")
+
+        # 列出 Addressables 资源
+        addr_dir = os.path.join(serve_dir, "Addressables")
+        if os.path.isdir(addr_dir):
+            print()
+            print("  ── 资源热更新 (Addressables) ──")
+            for subdir in sorted(os.listdir(addr_dir)):
+                subdir_path = os.path.join(addr_dir, subdir)
+                if os.path.isdir(subdir_path):
+                    print(f"    /Addressables/{subdir}/")
+                    list_files(subdir_path, prefix="      ",
+                               url_prefix=f"/Addressables/{subdir}")
+        else:
+            print()
+            print("  ── 资源热更新 ──")
+            print("    (未找到 Addressables 目录，请执行资源打包)")
+
         print()
         print("  按 Ctrl+C 停止")
-        print("=" * 60)
+        print("=" * 65)
 
         try:
             httpd.serve_forever()
@@ -76,6 +102,19 @@ def main():
             print("\n服务器已停止")
         finally:
             httpd.server_close()
+
+
+def list_files(directory, prefix="  ", url_prefix=""):
+    """列出目录下的文件（非递归，仅一层）。"""
+    try:
+        for name in sorted(os.listdir(directory)):
+            filepath = os.path.join(directory, name)
+            if os.path.isfile(filepath):
+                size_kb = os.path.getsize(filepath) / 1024
+                url = f"{url_prefix}/{name}" if url_prefix else f"/{name}"
+                print(f"{prefix}{url}  ({size_kb:.1f} KB)")
+    except OSError:
+        pass
 
 
 def get_local_ip():
