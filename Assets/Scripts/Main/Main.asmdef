@@ -3,6 +3,7 @@
     "rootNamespace": "Main",
     "references": [
         "Common",
+        "HybridCLR.Runtime",
         "Unity.Addressables",
         "UnityEngine.ResourceManager"
     ],
