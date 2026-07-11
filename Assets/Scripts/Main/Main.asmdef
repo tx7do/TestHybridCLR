@@ -5,7 +5,7 @@
         "Common",
         "HybridCLR.Runtime",
         "Unity.Addressables",
-        "UnityEngine.ResourceManager"
+        "Unity.ResourceManager"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

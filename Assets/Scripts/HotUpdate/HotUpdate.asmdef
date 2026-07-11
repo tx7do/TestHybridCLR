@@ -3,7 +3,7 @@
     "rootNamespace": "",
     "references": [
         "Unity.Addressables",
-        "UnityEngine.ResourceManager"
+        "Unity.ResourceManager"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
