@@ -8,9 +8,13 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Pp]references/
+/[Uu]ser[Ss]ettings/
 /[Pp]ackages-lock.json
 /Packages/*.json.meta
 /Packages~
+
+# Mono 崩溃日志
+mono_crash.*.json
 
 # 特定于 Unity 的文件和目录
 *.pidb
