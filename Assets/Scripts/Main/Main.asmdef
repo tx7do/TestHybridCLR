@@ -1,0 +1,18 @@
+{
+    "name": "Main",
+    "rootNamespace": "Main",
+    "references": [
+        "Common",
+        "Unity.Addressables",
+        "UnityEngine.ResourceManager"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

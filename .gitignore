@@ -116,3 +116,6 @@ Desktop.ini
 # =====================================
 # 如果需要保留某些文件，请取消注释并添加路径
 # !Assets/YourCustomFile.txt
+# Python 缓存
+__pycache__/
+*.pyc
