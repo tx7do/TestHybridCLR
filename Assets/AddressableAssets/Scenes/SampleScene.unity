@@ -270,7 +270,7 @@ GameObject:
   - component: {fileID: 908010077}
   - component: {fileID: 908010076}
   m_Layer: 0
-  m_Name: LoadDll
+  m_Name: GameBootstrap
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -285,9 +285,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 908010075}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b02e37c5b2164a2faa342fbc191584cf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Script: {fileID: 11500000, guid: 312b249a217143dc9ff5dfbe58e0eec1, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  enableHotUpdate: 1
 --- !u!4 &908010077
 Transform:
   m_ObjectHideFlags: 0

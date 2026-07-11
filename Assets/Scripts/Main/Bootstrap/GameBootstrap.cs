@@ -1,194 +1,115 @@
-﻿using System.Collections;
-using UnityEngine;
-using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
+using System.Collections;
+using System.Threading.Tasks;
 using Main.HybridCLR;
+using UnityEngine;
 
 namespace Main.Bootstrap
 {
+    /// <summary>
+    /// 游戏入口：串联热更新完整流程。
+    ///
+    /// 流程：
+    /// 1. 初始化 HybridCLR（加载 AOT 补充元数据）
+    /// 2. 检查代码更新（对比远程/本地 manifest 版本）
+    /// 3. 有更新则下载热更 DLL + MD5 校验
+    /// 4. 加载热更 DLL 并执行入口方法（下载后立即加载，无需重启）
+    ///
+    /// 将此组件挂载到场景中的 GameObject 上即可。
+    /// </summary>
     public class GameBootstrap : MonoBehaviour
     {
-        [SerializeField] private string initialSceneAddress = "MainMenu";
+        [Header("热更新配置")]
+        [Tooltip("是否启用热更新检查。关闭后将直接加载内置热更代码。")]
         [SerializeField] private bool enableHotUpdate = true;
+
+        /// <summary>
+        /// 日志回调，将关键步骤输出到 Console（ConsoleToScreen 会捕获显示）。
+        /// </summary>
+        private static void Log(string msg)
+        {
+            Debug.Log($"[GameBootstrap] {msg}");
+        }
 
         private void Start()
         {
             Application.targetFrameRate = 60;
-            StartCoroutine(InitializeGame());
+            Log("启动热更新流程");
+            StartCoroutine(RunHotUpdateFlow());
         }
 
-        private IEnumerator InitializeGame()
+        private IEnumerator RunHotUpdateFlow()
         {
-            // 显示加载界面
-            ShowLoadingScreen();
+            // ① 初始化 HybridCLR（加载 AOT 元数据）
+            Log("① 初始化 HybridCLR");
+            HybridClrManager.Initialize();
+            Log("HybridCLR 初始化完成");
 
-            // 初始化HybridCLR
+            // ② 检查并下载代码更新
             if (enableHotUpdate)
             {
-                yield return InitializeHybridClr();
-                yield return CheckAndApplyCodeUpdate();
-            }
+                Log("② 检查代码更新");
+                var checkTask = CodeUpdateManager.CheckForUpdates();
+                yield return WaitForTask(checkTask);
 
-            // 初始化Addressables
-            yield return InitializeAddressables();
-
-            // 检查资源更新
-            if (enableHotUpdate)
-            {
-                yield return CheckAndDownloadResourceUpdates();
-            }
-
-            // 加载初始场景
-            yield return LoadInitialScene();
-
-            // 隐藏加载界面
-            HideLoadingScreen();
-        }
-
-        private IEnumerator InitializeHybridClr()
-        {
-            // 初始化HybridCLR运行时环境
-            var initTask = HybridClrManager.Initialize();
-            while (!initTask.IsCompleted)
-            {
-                yield return null;
-            }
-
-            if (initTask.IsFaulted)
-            {
-                Debug.LogError($"HybridCLR初始化失败: {initTask.Exception}");
-                // 处理初始化失败的情况
-            }
-            else
-            {
-                Debug.Log("HybridCLR初始化成功");
-            }
-        }
-
-        private IEnumerator CheckAndApplyCodeUpdate()
-        {
-            // 检查代码更新
-            var updateCheckTask = CodeUpdateManager.CheckForUpdates();
-            while (!updateCheckTask.IsCompleted)
-            {
-                yield return null;
-            }
-
-            if (updateCheckTask.Result)
-            {
-                // 有更新，下载并应用
-                var downloadTask =
-                    CodeUpdateManager.DownloadAndApplyUpdates(UpdateLoadingProgress);
-                while (!downloadTask.IsCompleted)
+                if (checkTask.IsFaulted)
                 {
-                    yield return null;
+                    Log($"检查更新异常: {checkTask.Exception?.GetBaseException().Message}");
                 }
-
-                if (downloadTask.IsFaulted)
+                else if (checkTask.Result)
                 {
-                    Debug.LogError($"代码更新失败: {downloadTask.Exception}");
-                }
-                else
-                {
-                    Debug.Log("代码更新成功，重启游戏");
-                    // 重启游戏以应用更新
-                    Application.Quit();
-                }
-            }
-        }
+                    Log("发现新版本，开始下载");
+                    var downloadTask = CodeUpdateManager.DownloadAndApplyUpdates(OnDownloadProgress);
+                    yield return WaitForTask(downloadTask);
 
-        private IEnumerator InitializeAddressables()
-        {
-            var initHandle = Addressables.InitializeAsync();
-            yield return initHandle;
-
-            if (initHandle.Status != AsyncOperationStatus.Succeeded)
-            {
-                Debug.LogError("Addressables初始化失败");
-                // 处理初始化失败的情况
-            }
-            else
-            {
-                Debug.Log("Addressables初始化成功");
-            }
-        }
-
-        private IEnumerator CheckAndDownloadResourceUpdates()
-        {
-            // 检查Addressables资源更新
-            var checkHandle = Addressables.CheckForCatalogUpdates(false);
-            yield return checkHandle;
-
-            if (checkHandle.Status == AsyncOperationStatus.Succeeded && checkHandle.Result != null &&
-                checkHandle.Result.Count > 0)
-            {
-                Debug.Log($"发现 {checkHandle.Result.Count} 个Catalog更新");
-
-                // 更新Catalog
-                var updateHandle = Addressables.UpdateCatalogs(checkHandle.Result, false);
-                yield return updateHandle;
-
-                // 获取需要下载的资源大小
-                var sizeHandle = Addressables.GetDownloadSizeAsync("*");
-                yield return sizeHandle;
-
-                if (sizeHandle.Status == AsyncOperationStatus.Succeeded && sizeHandle.Result > 0)
-                {
-                    Debug.Log($"需要下载 {sizeHandle.Result / 1024f / 1024f:F2} MB 资源");
-
-                    // 下载更新
-                    var downloadHandle = Addressables.DownloadDependenciesAsync("*", Addressables.MergeMode.Union);
-                    while (!downloadHandle.IsDone)
+                    if (downloadTask.IsFaulted)
                     {
-                        UpdateLoadingProgress(downloadHandle.PercentComplete);
-                        yield return null;
+                        Log($"下载失败: {downloadTask.Exception?.GetBaseException().Message}");
                     }
-
-                    if (downloadHandle.Status == AsyncOperationStatus.Succeeded)
+                    else if (downloadTask.Result)
                     {
-                        Debug.Log("资源更新下载完成");
+                        Log("下载成功");
                     }
                     else
                     {
-                        Debug.LogError("资源更新下载失败");
-                        // 处理下载失败的情况
+                        Log("下载失败（校验或写入错误）");
                     }
                 }
+                else
+                {
+                    Log("已是最新版本");
+                }
             }
-        }
-
-        private IEnumerator LoadInitialScene()
-        {
-            var loadHandle = Addressables.LoadSceneAsync(initialSceneAddress);
-            yield return loadHandle;
-
-            if (loadHandle.Status != AsyncOperationStatus.Succeeded)
+            else
             {
-                Debug.LogError($"加载初始场景失败: {initialSceneAddress}");
-                // 处理加载失败的情况
+                Log("② 跳过热更新检查（已禁用）");
             }
-        }
 
-        private void ShowLoadingScreen()
-        {
-            // 显示加载界面的实现
-            Debug.Log("显示加载界面");
-        }
+            // ③ 加载并执行热更代码
+            Log("③ 加载热更代码并执行入口");
+            HotUpdateLoader.LoadAndRun(Log);
 
-        private void HideLoadingScreen()
-        {
-            // 隐藏加载界面的实现
-            Debug.Log("隐藏加载界面");
+            Log("热更新流程结束");
         }
 
         /// <summary>
-        /// 更新加载进度UI
+        /// 将 Task 转为 IEnumerator，在协程中逐帧等待完成。
         /// </summary>
-        /// <param name="progress">进度</param>
-        private void UpdateLoadingProgress(float progress)
+        private static IEnumerator WaitForTask(Task task)
         {
-            // 更新加载进度UI的实现
-            Debug.Log($"加载进度: {progress * 100:F2}%");
+            while (!task.IsCompleted)
+            {
+                yield return null;
+            }
+        }
+
+        private void OnDownloadProgress(float progress)
+        {
+            // 每 10% 输出一次，避免日志过多
+            var percent = Mathf.RoundToInt(progress * 100f);
+            if (percent % 10 == 0)
+            {
+                Log($"下载进度: {percent}%");
+            }
         }
     }
 }

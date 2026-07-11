@@ -1,80 +1,138 @@
-﻿using System.Collections.Generic;
 using System.IO;
-using System.Threading.Tasks;
 using HybridCLR;
 using UnityEngine;
 using UnityEngine.Networking;
 
 namespace Main.HybridCLR
 {
+    /// <summary>
+    /// HybridCLR 运行时管理器：负责加载 AOT 补充元数据程序集。
+    ///
+    /// AOT 元数据 DLL 随主程序打包到 StreamingAssets/AOT/ 目录，
+    /// 运行时扫描该目录下的所有 .dll 文件并加载。
+    ///
+    /// 注意：
+    /// - HybridCLR 运行时无需显式 Initialize，直接调用 LoadMetadataForAOTAssembly 即可。
+    /// - Editor 下 LoadMetadataForAOTAssembly 为空实现，即使没有 AOT 文件也不会报错。
+    /// </summary>
     public static class HybridClrManager
     {
-        private static bool _initialized = false;
+        private static bool _initialized;
 
-        private static readonly List<string> AOTAssemblies = new()
-        {
-            "mscorlib.dll",
-            "System.dll",
-            "System.Core.dll",
-            "UnityEngine.CoreModule.dll",
-            // 添加更多AOT程序集
-        };
-
-        public static async Task Initialize()
+        /// <summary>
+        /// 初始化：加载 StreamingAssets/AOT/ 下所有补充元数据。
+        /// 需在主线程调用（内部使用 UnityWebRequest）。
+        /// </summary>
+        public static void Initialize()
         {
             if (_initialized)
             {
                 return;
             }
 
-            // 加载AOT元数据
-            await LoadAOTAssemblies();
-
-            // 初始化HybridCLR
-            // RuntimeApi.Initialize();
-
+            LoadAOTAssemblies();
             _initialized = true;
         }
 
-        private static async Task LoadAOTAssemblies()
+        /// <summary>
+        /// 扫描并加载 AOT 元数据目录下所有 DLL。
+        /// </summary>
+        private static void LoadAOTAssemblies()
         {
-            foreach (var assemblyName in AOTAssemblies)
+            var aotDir = Path.Combine(Application.streamingAssetsPath, "AOT");
+
+#if UNITY_EDITOR || !UNITY_ANDROID
+            // Editor / 非 Android：直接用文件系统读取
+            if (!Directory.Exists(aotDir))
             {
-                var aotPath = Path.Combine(Application.streamingAssetsPath, "AOT", assemblyName);
+                Debug.LogWarning($"[HybridClrManager] AOT 元数据目录不存在: {aotDir}（Editor 下可忽略）");
+                return;
+            }
 
-                if (Application.platform == RuntimePlatform.Android)
+            var dllFiles = Directory.GetFiles(aotDir, "*.dll", SearchOption.TopDirectoryOnly);
+            if (dllFiles.Length == 0)
+            {
+                Debug.LogWarning($"[HybridClrManager] AOT 目录为空: {aotDir}（Editor 下可忽略）");
+                return;
+            }
+
+            var successCount = 0;
+            foreach (var dllPath in dllFiles)
+            {
+                var dllName = Path.GetFileName(dllPath);
+                var dllBytes = File.ReadAllBytes(dllPath);
+                if (LoadOneAOT(dllName, dllBytes))
                 {
-                    // 在Android上使用UnityWebRequest加载
-                    using var request = UnityWebRequest.Get(aotPath);
-                    var operation = request.SendWebRequest();
-                    while (!operation.isDone)
-                    {
-                        await Task.Yield();
-                    }
-
-                    if (request.result != UnityWebRequest.Result.Success)
-                    {
-                        Debug.LogError($"加载AOT程序集失败: {assemblyName}, 错误: {request.error}");
-                        continue;
-                    }
-
-                    var dllBytes = request.downloadHandler.data;
-                    RuntimeApi.LoadMetadataForAOTAssembly(dllBytes, HomologousImageMode.Consistent);
-                }
-                else
-                {
-                    // 在其他平台上使用文件系统加载
-                    if (File.Exists(aotPath))
-                    {
-                        var dllBytes = await File.ReadAllBytesAsync(aotPath);
-                        RuntimeApi.LoadMetadataForAOTAssembly(dllBytes, HomologousImageMode.Consistent);
-                    }
-                    else
-                    {
-                        Debug.LogError($"AOT程序集文件不存在: {aotPath}");
-                    }
+                    successCount++;
                 }
             }
+
+            Debug.Log($"[HybridClrManager] AOT 元数据加载完成: {successCount}/{dllFiles.Length}");
+#else
+            // Android：StreamingAssets 在 .apk 内，需用 UnityWebRequest 读取
+            LoadAOTAssembliesAndroid(aotDir);
+#endif
+        }
+
+        /// <summary>
+        /// Android 平台下加载 AOT 元数据。
+        /// 通过打包时生成的 aot_files.txt 清单逐个下载。
+        /// </summary>
+        private static void LoadAOTAssembliesAndroid(string aotDir)
+        {
+            var manifestPath = aotDir + "/aot_files.txt";
+            using var manifestReq = UnityWebRequest.Get(manifestPath);
+            manifestReq.SendWebRequest();
+            while (!manifestReq.isDone) { }
+
+            if (manifestReq.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning($"[HybridClrManager] 无法读取 AOT 清单: {manifestReq.error}（Editor 下可忽略）");
+                return;
+            }
+
+            var dllNames = manifestReq.downloadHandler.text
+                .Split(new[] { '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries);
+
+            var successCount = 0;
+            foreach (var rawName in dllNames)
+            {
+                var dllName = rawName.Trim();
+                if (string.IsNullOrEmpty(dllName)) continue;
+
+                using var fileReq = UnityWebRequest.Get($"{aotDir}/{dllName}");
+                fileReq.SendWebRequest();
+                while (!fileReq.isDone) { }
+
+                if (fileReq.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[HybridClrManager] 加载 AOT 失败: {dllName}, {fileReq.error}");
+                    continue;
+                }
+
+                if (LoadOneAOT(dllName, fileReq.downloadHandler.data))
+                {
+                    successCount++;
+                }
+            }
+
+            Debug.Log($"[HybridClrManager] AOT 元数据加载完成(Android): {successCount}/{dllNames.Length}");
+        }
+
+        /// <summary>
+        /// 加载单个 AOT 元数据 DLL，返回是否成功。
+        /// </summary>
+        private static bool LoadOneAOT(string dllName, byte[] dllBytes)
+        {
+            var errorCode = RuntimeApi.LoadMetadataForAOTAssembly(dllBytes, HomologousImageMode.SuperSet);
+            if (errorCode == LoadImageErrorCode.OK)
+            {
+                Debug.Log($"[HybridClrManager] 加载 AOT 元数据成功: {dllName}");
+                return true;
+            }
+
+            Debug.LogWarning($"[HybridClrManager] 加载 AOT 元数据失败: {dllName}, 错误码: {errorCode}");
+            return false;
         }
     }
 }

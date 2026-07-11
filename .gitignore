@@ -45,12 +45,20 @@
 # HybridCLR 运行时数据
 /hybridclr_assets/
 /hybridclr_il2cpp_output/
-/hybridclr_il2cpp_output_*
+/hybridclr_il2cpp_output_*/
 /HybridCLRData/HotUpdateDlls
+# 服务器输出目录（打包产物，不入版本库）
+/HybridCLRData/ServerOutput/
 
 # 预编译的 dll
 /Assets/Plugins/HybridCLR/AOT/
 /Assets/Plugins/HybridCLR/HotUpdateDlls/
+
+# StreamingAssets 下打包拷贝的 AOT 元数据和热更 DLL（由打包脚本生成）
+/Assets/StreamingAssets/AOT/
+/Assets/StreamingAssets/AOT.meta
+/Assets/StreamingAssets/HotUpdate.dll
+/Assets/StreamingAssets/HotUpdate.dll.meta
 
 # =====================================
 # 常见第三方插件忽略规则
