@@ -2,8 +2,6 @@ using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
-using UnityEditor.AddressableAssets.Build;
-using UnityEditor.AddressableAssets.Build.DataBuilders;
 using UnityEditor.AddressableAssets.Settings;
 using UnityEngine;
 
@@ -182,37 +180,25 @@ namespace EditorTools
         }
 
         /// <summary>
-        /// 执行 Addressables 构建。
+        /// 执行 Addressables 构建（适配 2.x API）。
+        /// 2.x 中使用 AddressableAssetSettings.BuildPlayerContent() 静态方法。
         /// </summary>
         private static void BuildAddressablesInternal(AddressableAssetSettings settings)
         {
-            // 使用 Packed Mode（BuildScriptPackedMode）构建
-            var builder = settings.ActivePlayerDataBuilder;
-            if (builder == null)
-            {
-                throw new InvalidOperationException("无有效的 Addressables DataBuilder");
-            }
+            // 2.x 的官方构建入口：BuildPlayerContent(out result)
+            AddressableAssetSettings.BuildPlayerContent(out var result);
 
-            // 设置构建选项
-            var buildContext = new AddressablesPlayerBuildData
-            {
-                AddressablesSettings = settings
-            };
-
-            // 执行构建
-            var buildResults = builder.BuildData<AddressableAssetBuildResult>(buildContext);
-
-            if (buildResults == null)
+            if (result == null)
             {
                 throw new Exception("构建结果为空");
             }
 
-            if (!string.IsNullOrEmpty(buildResults.Error))
+            if (!string.IsNullOrEmpty(result.Error))
             {
-                throw new Exception($"构建错误: {buildResults.Error}");
+                throw new Exception($"构建错误: {result.Error}");
             }
 
-            Debug.Log($"Addressables 构建完成，输出目录: {buildResults.OutputPath}");
+            Debug.Log($"Addressables 构建完成，输出目录: {result.OutputPath}");
         }
 
         /// <summary>

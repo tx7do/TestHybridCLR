@@ -3,19 +3,20 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Settings;
+using UnityEditor.AddressableAssets.Settings.GroupSchemas;
 using UnityEngine;
 
 namespace EditorTools
 {
     /// <summary>
-    /// Addressables 首次设置工具。
+    /// Addressables 首次设置工具（适配 Addressables 2.x）。
     ///
     /// 自动完成以下操作：
     /// 1. 创建 AddressableAssetSettings（如果不存在）
     /// 2. 配置 Profile 的 Remote.BuildPath 和 Remote.LoadPath
     ///    - BuildPath: ServerData/[BuildTarget]
     ///    - LoadPath:  http://localhost:8080/Addressables/[BuildTarget]
-    /// 3. 确保 Default Group 存在
+    /// 3. 确保 Default Group 存在并配置为远程打包
     ///
     /// 菜单：HotUpdate/Addressables/0. Setup Addressables Settings
     /// </summary>
@@ -24,10 +25,14 @@ namespace EditorTools
         private const string MenuRoot = "HotUpdate/Addressables/";
 
         /// <summary>远程加载根 URL（与 serve_hotupdate.py 配合）</summary>
-        private const string RemoteLoadUrl = "http://localhost:8080/Addressables/[BuildTarget]";
+        private const string RemoteLoadPathValue = "http://localhost:8080/Addressables/[BuildTarget]";
 
         /// <summary>远程构建输出目录</summary>
-        private const string RemoteBuildPath = "ServerData/[BuildTarget]";
+        private const string RemoteBuildPathValue = "ServerData/[BuildTarget]";
+
+        /// <summary>Profile 变量名（Addressables 内置约定）</summary>
+        private const string RemoteBuildPathVar = "Remote.BuildPath";
+        private const string RemoteLoadPathVar = "Remote.LoadPath";
 
         /// <summary>默认 Group 名称</summary>
         private const string DefaultGroupName = "Default Local Group";
@@ -46,7 +51,6 @@ namespace EditorTools
                 var settings = AddressableAssetSettingsDefaultObject.GetSettings(true);
                 if (settings == null)
                 {
-                    // GetSettings(true) 在极端情况下可能返回 null，手动创建
                     settings = CreateSettingsManually();
                 }
 
@@ -55,14 +59,15 @@ namespace EditorTools
                 // 2. 配置 Profile
                 ConfigureProfile(settings);
 
-                // 3. 确保 Group 存在
+                // 3. 确保 Group 存在并配置 Schema
                 EnsureDefaultGroup(settings);
 
-                // 4. 设置 Build 远程目录
+                // 4. 开启远程 Catalog
                 settings.BuildRemoteCatalog = true;
-                settings.RemoteCatalogLoadPath = RemoteLoadUrl;
-                settings.SaveRemoteCatalogStartupBehavior =
-                    AddressableAssetSettings.RemoteCatalogLoadHint.Enabled;
+                // RemoteCatalogBuildPath / RemoteCatalogLoadPath 是 ProfileValueReference，
+                // 2.x 中通过 SetVariableByName 指向 Profile 变量。
+                settings.RemoteCatalogBuildPath.SetVariableByName(settings, RemoteBuildPathVar);
+                settings.RemoteCatalogLoadPath.SetVariableByName(settings, RemoteLoadPathVar);
 
                 EditorUtility.SetDirty(settings);
                 AssetDatabase.SaveAssets();
@@ -70,8 +75,8 @@ namespace EditorTools
                 Debug.Log("===== Addressables 设置完成 =====");
                 EditorUtility.DisplayDialog("设置完成",
                     "Addressables 环境配置完成！\n\n" +
-                    $"远程构建目录: {RemoteBuildPath}\n" +
-                    $"远程加载URL: {RemoteLoadUrl}\n\n" +
+                    $"远程构建目录: {RemoteBuildPathValue}\n" +
+                    $"远程加载URL: {RemoteLoadPathValue}\n\n" +
                     "现在可以执行 Build Addressables 打包资源了。", "OK");
             }
             catch (Exception e)
@@ -101,8 +106,10 @@ namespace EditorTools
                 return;
             }
 
-            var activeProfile = settings.activeProfile;
-            var profileName = activeProfile != null ? activeProfile.name : "(无)";
+            var profileId = settings.activeProfileId;
+            var profileName = string.IsNullOrEmpty(profileId)
+                ? "(无)"
+                : settings.profileSettings.GetProfileName(profileId);
             var groupCount = settings.groups.Count;
 
             Debug.Log($"[Addressables] Settings: {AssetDatabase.GetAssetPath(settings)}");
@@ -148,52 +155,54 @@ namespace EditorTools
         {
             var profileSettings = settings.profileSettings;
 
-            // 获取或创建当前活跃 Profile
-            var profile = settings.activeProfile;
-            if (profile == null)
+            // 获取或创建当前活跃 Profile（2.x 用 activeProfileId 替代 activeProfile）
+            var profileId = settings.activeProfileId;
+            if (string.IsNullOrEmpty(profileId))
             {
-                profile = profileSettings.GetProfile("Default");
-                if (profile == null)
+                // 查找名为 "Default" 的 Profile
+                var defaultData = profileSettings.GetProfileDataByName("Default");
+                if (defaultData == null)
                 {
-                    profile = profileSettings.AddProfile("Default", null);
+                    profileId = profileSettings.AddProfile("Default", null);
+                }
+                else
+                {
+                    profileId = defaultData.Id;
                 }
 
-                settings.activeProfileId = profile.id;
+                settings.activeProfileId = profileId;
             }
 
-            // 设置 Remote.BuildPath / Remote.LoadPath
-            SetValue(profileSettings, profile.id, "Remote.BuildPath", RemoteBuildPath);
-            SetValue(profileSettings, profile.id, "Remote.LoadPath", RemoteLoadUrl);
+            // 确保 Remote 变量存在
+            EnsureProfileVariable(profileSettings, RemoteBuildPathVar, RemoteBuildPathValue);
+            EnsureProfileVariable(profileSettings, RemoteLoadPathVar, RemoteLoadPathValue);
 
-            // 同时配置 Local 路径（默认值即可）
-            SetValue(profileSettings, profile.id, "Local.BuildPath", "[UnityEngine.AddressableAssets.Addressables.BuildPath]/[BuildTarget]");
-            SetValue(profileSettings, profile.id, "Local.LoadPath", "{UnityEngine.AddressableAssets.Addressables.RuntimePath}/[BuildTarget]");
+            // 设置当前 Profile 下这些变量的值
+            profileSettings.SetValue(profileId, RemoteBuildPathVar, RemoteBuildPathValue);
+            profileSettings.SetValue(profileId, RemoteLoadPathVar, RemoteLoadPathValue);
 
-            Debug.Log($"Profile '{profile.name}' 配置完成");
-            Debug.Log($"  Remote.BuildPath = {RemoteBuildPath}");
-            Debug.Log($"  Remote.LoadPath  = {RemoteLoadUrl}");
+            var profileName = profileSettings.GetProfileName(profileId);
+            Debug.Log($"Profile '{profileName}' 配置完成");
+            Debug.Log($"  {RemoteBuildPathVar} = {RemoteBuildPathValue}");
+            Debug.Log($"  {RemoteLoadPathVar} = {RemoteLoadPathValue}");
         }
 
         /// <summary>
-        /// 设置 Profile 变量值，如果变量不存在则创建。
+        /// 确保某个 Profile 变量定义存在（不存在则创建）。
+        /// 2.x 中 CreateValue 返回 variableId。
         /// </summary>
-        private static void SetValue(AddressableAssetProfileSettings profileSettings,
-            string profileId, string varName, string value)
+        private static void EnsureProfileVariable(AddressableAssetProfileSettings profileSettings,
+            string varName, string defaultValue)
         {
-            var varId = profileSettings.GetVariableId(varName);
-            if (string.IsNullOrEmpty(varId))
+            var data = profileSettings.GetProfileDataByName(varName);
+            if (data == null)
             {
-                // 变量不存在，创建它
-                profileSettings.CreateValue(varName, value);
-            }
-            else
-            {
-                profileSettings.SetValue(profileId, varName, value);
+                profileSettings.CreateValue(varName, defaultValue);
             }
         }
 
         /// <summary>
-        /// 确保默认 Group 存在。
+        /// 确保默认 Group 存在，并配置 BundledAssetGroupSchema 为远程打包。
         /// </summary>
         private static void EnsureDefaultGroup(AddressableAssetSettings settings)
         {
@@ -208,27 +217,19 @@ namespace EditorTools
                 Debug.Log($"Group 已存在: {DefaultGroupName}");
             }
 
-            // 将 Group 的 Bundle 模式设为 Together（打包到一个 bundle）
-            // 并设置远程构建
-            var schema = group.GetSchema<AddressableAssetGroupSchema>();
-            if (schema != null)
-            {
-                schema.IncludeInBuild = true;
-                schema.BuildPath.SetVariableByName(settings, "Remote.BuildPath");
-                schema.LoadPath.SetVariableByName(settings, "Remote.LoadPath");
-            }
-
-            // 添加 BundledAssetGroupSchema（用于远程打包配置）
+            // 添加/获取 BundledAssetGroupSchema（2.x 中在 GroupSchemas 命名空间）
             var bundleSchema = group.GetSchema<BundledAssetGroupSchema>();
             if (bundleSchema == null)
             {
                 bundleSchema = group.AddSchema<BundledAssetGroupSchema>();
             }
 
-            bundleSchema.BuildPath.SetVariableByName(settings, "Remote.BuildPath");
-            bundleSchema.LoadPath.SetVariableByName(settings, "Remote.LoadPath");
+            bundleSchema.IncludeInBuild = true;
+            // 2.x 中 BuildPath / LoadPath 是 ProfileValueReference，通过 SetVariableByName 设置
+            bundleSchema.BuildPath.SetVariableByName(settings, RemoteBuildPathVar);
+            bundleSchema.LoadPath.SetVariableByName(settings, RemoteLoadPathVar);
             bundleSchema.BundleMode = BundledAssetGroupSchema.BundlePackingMode.PackTogether;
-            bundleSchema.CompressBundle = BundledAssetGroupSchema.BundleCompressionMode.LZ4;
+            bundleSchema.Compression = BundledAssetGroupSchema.BundleCompressionMode.LZ4;
         }
     }
 }
